@@ -3,8 +3,8 @@
 
 // Construtor
 TelnetServer::TelnetServer(uint16_t port, bool logEnabled)
-    : _server(port), _port(port), _logEnabled(logEnabled), _running(false), _echoEnabled(false),
-      _welcomeMessage("Bem-vindo ao servidor Telnet\r\n"), _prompt("> ") {}
+    : _server(port), _port(port), _logEnabled(logEnabled), _running(false),
+      _welcomeMessage("Bem-vindo ao servidor Telnet\r\n> ") {}
 
 // Destrutor
 TelnetServer::~TelnetServer() { stop(); }
@@ -59,53 +59,30 @@ void TelnetServer::update() {
 
 // Manipula novas conexões
 void TelnetServer::handleNewConnections() {
-    WiFiClient newClient = _server.accept();
-    if (newClient && newClient.connected()) {
-        if (_logEnabled) {
-            LOG_INFO("[TELNET] Novo cliente conectado: %s", newClient.remoteIP().toString().c_str());
-        }
+    if (WiFiClient client = _server.available()) {
+        std::lock_guard<std::mutex> lock(_mutex);
+        _clients.push_back({client, "", millis(), true}); // Adiciona authenticated
 
-        ClientContext context;
-        context.client = newClient;
-        context.buffer = "";
-        context.lastActivity = millis();
-        context.authenticated = true; // Ou implementar autenticação
-
-        // Configuração inicial do cliente
         if (_echoEnabled) {
-            sendTelnetCommand(context.client, 0xFB, 0x01); // WILL ECHO
+            client.print("Echo enabled\r\n");
         }
-
-        context.client.print(_welcomeMessage);
-        context.client.print(_prompt);
-
-        _clients.push_back(context);
+        client.print(_welcomeMessage);
+        client.print(_prompt);
     }
 }
 
 // Manipula clientes existentes
 void TelnetServer::handleExistingClients() {
-    for (size_t i = 0; i < _clients.size();) {
-        auto &client = _clients[i];
+    std::lock_guard<std::mutex> lock(_mutex);
 
-        // Verifica timeout
-        if (millis() - client.lastActivity > CLIENT_TIMEOUT_MS) {
-            disconnectClient(client, "Tempo de inatividade excedido");
-            _clients.erase(_clients.begin() + i);
-            continue;
+    for (auto it = _clients.begin(); it != _clients.end();) {
+        if (millis() - it->lastActivity > CLIENT_TIMEOUT_MS) {
+            disconnectClient(*it, "Tempo de inatividade excedido");
+            it = _clients.erase(it);
+        } else {
+            handleClient(*it);
+            ++it;
         }
-
-        // Verifica conexão
-        if (!client.client.connected()) {
-            if (_logEnabled) {
-                LOG_INFO("[TELNET] Cliente desconectado");
-            }
-            _clients.erase(_clients.begin() + i);
-            continue;
-        }
-
-        handleClient(client);
-        i++;
     }
 }
 
@@ -115,18 +92,15 @@ void TelnetServer::handleClient(ClientContext &context) {
         char c = context.client.read();
         context.lastActivity = millis();
 
-        if (c == '\n' || c == '\r') {
+        if (c == '\t' && _tabHandler) { // Trata pressionamento de TAB
+            _tabHandler(context.client, context.buffer);
+        } else if (c == '\n' || c == '\r') {
             if (!context.buffer.isEmpty()) {
                 processBuffer(context);
                 context.buffer = "";
             }
         } else if (context.buffer.length() < MAX_BUFFER_SIZE) {
             context.buffer += c;
-        }
-
-        // Ecoa o caractere se habilitado
-        if (_echoEnabled && c != '\n' && c != '\r') {
-            context.client.write(c);
         }
     }
 }
@@ -177,6 +151,11 @@ void TelnetServer::setDefaultHandler(CommandHandler handler) {
     _defaultHandler = handler;
 }
 
+void TelnetServer::setTabHandler(CommandHandler handler) {
+    std::lock_guard<std::mutex> lock(_mutex);
+    _tabHandler = handler;
+}
+
 // Define a mensagem de boas-vindas
 void TelnetServer::setWelcomeMessage(const String &message) {
     std::lock_guard<std::mutex> lock(_mutex);
@@ -190,10 +169,7 @@ void TelnetServer::setPrompt(const String &prompt) {
 }
 
 // Habilita/desabilita eco
-void TelnetServer::enableEcho(bool enable) {
-    std::lock_guard<std::mutex> lock(_mutex);
-    _echoEnabled = enable;
-}
+void TelnetServer::enableEcho(bool enable) { _echoEnabled = enable; }
 
 // Número de clientes conectados
 size_t TelnetServer::getClientCount() const {
@@ -212,10 +188,10 @@ void TelnetServer::disconnectAllClients() {
 
 // Desconecta um cliente específico
 void TelnetServer::disconnectClient(ClientContext &context, const String &message) {
-    if (!message.isEmpty()) {
+    if (context.client.connected()) {
         context.client.println(message);
+        context.client.stop();
     }
-    context.client.stop();
 }
 
 // Filtra comandos Telnet
