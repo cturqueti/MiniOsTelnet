@@ -1,0 +1,17 @@
+# Lista de Autores e Contribuidores
+# Formato: Nome <email> (GitHub/website) - Contribuições
+
+## Autores Principais
+- cturqueti <carlosturqueti@gmail.com> (https://github.com/cturqueti) - Criador e mantenedor principal
+
+## Contribuidores Significativos
+- DeepSeek
+
+## Agradecimentos Especiais
+- Comunidade ESP32 no Fórum PlatformIO
+- Equipe de desenvolvimento do Arduino-ESP32
+
+# Como creditar novas contribuições
+Por favor, adicione seu nome nesta lista quando enviar um Pull Request significativo.
+Formato preferido:
+- Seu Nome <email> (GitHub) - Breve descrição da contribuição
