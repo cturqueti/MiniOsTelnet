@@ -3,11 +3,14 @@
 // Inicializa a variável estática
 String TelnetCommands::currentDirectory = "/";
 
+static TelnetCommands *currentServer = nullptr;
+
 void TelnetCommands::setupDefaultCommands(TelnetServer &server) {
     // Configurações básicas
     server.setWelcomeMessage("Bem-vindo ao servidor Telnet\r\n"
                              "Digite 'help' para lista de comandos\r\n\r\n");
 
+    currentServer = &server;
     server.setPrompt("> ");
     server.enableEcho(false);
 
@@ -140,4 +143,9 @@ void TelnetCommands::handleUnknownCommand(WiFiClient &client, const String &cmd)
     client.printf("Comando desconhecido: '%s'\r\n", cmd.c_str());
     client.println("Digite 'help' para ver os comandos disponíveis");
     client.println();
+}
+
+void TelnetCommands::updatePrompt(TelnetServer &server) {
+    // Atualiza o prompt com o diretório atual (pode ser chamado após mudar de diretório)
+    server.setPrompt("\033[1;34m" + currentDirectory + "> \033[0m");
 }

@@ -23,6 +23,8 @@ class TelnetCommands {
     // Métodos auxiliares
     static String resolvePath(const String &path);
     static bool isDirectory(const String &path);
+
+    void updatePrompt(TelnetServer &server);
 };
 
 #endif // TELNET_COMMANDS_H
