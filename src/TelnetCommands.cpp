@@ -20,20 +20,33 @@ void TelnetCommands::setupDefaultCommands(TelnetServer &server) {
     server.addCommand("ls", handleListFiles);
     server.addCommand("cd", handleChangeDir);
     server.addCommand("pwd", handlePrintWorkingDir);
+    server.addCommand("cat", handleCatCommand);
     server.addCommand("clear", handleClearScreen);
+    server.addCommand("exit", handleExitCommand);
 
     // Handler padrão
     server.setDefaultHandler(handleUnknownCommand);
 }
 
 void TelnetCommands::handleHelp(WiFiClient &client, const String &) {
-    client.println("Comandos disponíveis:");
-    client.println("help          - Mostra esta ajuda");
-    client.println("ls [path]     - Lista arquivos no diretório atual ou especificado");
-    client.println("cd [path]     - Muda para o diretório especificado");
-    client.println("pwd           - Mostra o diretório atual");
-    client.println("clear         - Limpa a tela");
-    client.println("exit          - Desconecta");
+    client.println(styleText("Comandos disponíveis:", "yellow", true, false));
+    client.println();
+
+    // Lista de comandos formatados
+    client.println(String(styleText("help", "white", true, false) + "          - " +
+                          styleText("Mostra esta ajuda", "cyan", false, false)));
+    client.println(String(styleText("ls [path]", "white", true, false) + "     - " +
+                          styleText("Lista arquivos no diretório atual ou especificado", "cyan", false, false)));
+    client.println(String(styleText("cd [path]", "white", true, false) + "     - " +
+                          styleText("Muda para o diretório especificado", "cyan", false, false)));
+    client.println(String(styleText("pwd", "white", true, false) + "           - " +
+                          styleText("Mostra o diretório atual", "cyan", false, false)));
+    client.println(String(styleText("cat [file]", "white", true, false) + "    - " +
+                          styleText("Exibe conteúdo de arquivos", "cyan", false, false)));
+    client.println(String(styleText("clear", "white", true, false) + "         - " +
+                          styleText("Limpa a tela", "cyan", false, false)));
+    client.println(String(styleText("exit", "white", true, false) + "          - " +
+                          styleText("Encerra a sessão Telnet", "cyan", false, false)));
     client.println();
 }
 
@@ -72,6 +85,11 @@ void TelnetCommands::handleChangeDir(WiFiClient &client, const String &cmd) {
         if (_log)
             LOG_ERROR("[CD] Erro: servidor não inicializado");
         client.println("Erro interno do servidor");
+        return;
+    }
+
+    if (cmd.length() >= 5 && cmd.substring(3, 5) == "-h") { // "cd -h"
+        helpChangeDir(client);
         return;
     }
 
@@ -119,9 +137,107 @@ void TelnetCommands::handleChangeDir(WiFiClient &client, const String &cmd) {
     client.clear();
 }
 
+// Implementação do cat
+void TelnetCommands::handleCatCommand(WiFiClient &client, const String &cmd) {
+    if (cmd.length() <= 4) { // Apenas "cat" sem argumentos
+        client.println("Uso: cat <arquivo>");
+        client.println("Exibe o conteúdo de um arquivo");
+        return;
+    }
+
+    // Correção: primeiro extrai a substring, depois aplica trim()
+    String pathArg = cmd.substring(4);
+    pathArg.trim();
+    String filePath = resolvePath(pathArg);
+
+    // Verifica se o usuário pediu versão (cat -v)
+    if (pathArg == "-v") {
+        client.println("cat versão 1.0");
+        client.println("Suporta exibição de arquivos texto e binários");
+        return;
+    }
+
+    // Verifica se o usuário pediu ajuda (cat -h)
+    if (pathArg == "-h") {
+        helpCatCommand(client);
+    }
+
+    if (!LittleFS.exists(filePath)) {
+        client.printf("Arquivo não encontrado: %s\r\n", filePath.c_str());
+        return;
+    }
+
+    if (isDirectory(filePath)) {
+        client.printf("%s é um diretório, não um arquivo\r\n", filePath.c_str());
+        return;
+    }
+
+    File file = LittleFS.open(filePath, "r");
+    if (!file) {
+        client.printf("Erro ao abrir o arquivo: %s\r\n", filePath.c_str());
+        return;
+    }
+
+    client.printf("Conteúdo de %s:\r\n", filePath.c_str());
+    client.println("--------------------------------------------------");
+
+    // Lê e envia o arquivo em chunks para evitar sobrecarregar a memória
+    const size_t bufferSize = 256;
+    uint8_t buffer[bufferSize];
+    size_t bytesRead;
+
+    while ((bytesRead = file.read(buffer, bufferSize)) > 0) {
+        client.write(buffer, bytesRead);
+    }
+
+    client.println("\r\n--------------------------------------------------");
+    client.printf("Fim do arquivo (%d bytes)\r\n", file.size());
+
+    file.close();
+}
+
 // Implementação do pwd
 void TelnetCommands::handlePrintWorkingDir(WiFiClient &client, const String &) {
     client.printf("Diretório atual: %s\r\n", currentDirectory.c_str());
+}
+
+// Implementação do exit
+void TelnetCommands::handleExitCommand(WiFiClient &client, const String &cmd) {
+
+    String pathArg = cmd.substring(5);
+    pathArg.trim();
+    // Verifica se foi solicitada ajuda
+    if (cmd.length() > 5 && pathArg == "-h") {
+        helpExitCommand(client);
+        return;
+    }
+
+    // Confirmação (opcional)
+    client.println("Tem certeza que deseja sair? (s/n)");
+    client.clear();
+
+    // Aguarda resposta (opcional)
+    unsigned long startTime = millis();
+    while (millis() - startTime < 5000) { // Timeout de 5 segundos
+        if (client.available()) {
+            char response = client.read();
+            if (response == 's' || response == 'S') {
+                client.println("Desconectando... Adeus!");
+                if (_log) {
+                    LOG_INFO("[TELNET] Cliente desconectado via comando exit");
+                }
+                delay(100); // Tempo para enviar a mensagem
+                client.stop();
+                return;
+            } else {
+                client.println("Cancelado.");
+                return;
+            }
+        }
+        delay(50);
+    }
+
+    client.println("Timeout. Comando cancelado.");
 }
 
 // Métodos auxiliares
@@ -247,4 +363,71 @@ void TelnetCommands::findPartialPath(WiFiClient &client, const String &target) {
 
     root.close();
     return;
+}
+
+void TelnetCommands::helpChangeDir(WiFiClient &client) {
+    client.println("Ajuda do comando cd:");
+    client.println("Uso: cd [diretório]");
+    client.println("Opções:");
+    client.println("  -h          Mostra esta ajuda");
+    client.println("  ..          Volta para o diretório pai");
+    client.println("  /           Vai para o diretório raiz");
+    client.println("  [nome]?     Lista diretórios que começam com [nome]");
+    client.println("Exemplos:");
+    client.println("  cd /        Vai para o diretório raiz");
+    client.println("  cd dir      Entra no diretório 'dir'");
+    client.println("  cd ..       Volta um diretório");
+    client.println("  cd abc?     Lista diretórios começando com 'abc'");
+}
+
+void TelnetCommands::helpCatCommand(WiFiClient &client) {
+    client.println("Ajuda do comando cat:");
+    client.println("Uso: cat <arquivo>");
+    client.println("Opções:");
+    client.println("  -h          Mostra esta ajuda");
+    client.println("  -v          Mostra a versão do cat");
+    client.println("  [arquivo]   Exibe o conteúdo do arquivo especificado");
+    client.println("Exemplos:");
+    client.println("  cat /dados/config.txt  Exibe o arquivo config.txt");
+    client.println("  cat teste.log          Exibe o arquivo teste.log no diretório atual");
+}
+
+void TelnetCommands::helpExitCommand(WiFiClient &client) {
+    client.println("Ajuda do comando exit:");
+    client.println("Uso: exit");
+    client.println("Encerra a sessão Telnet atual");
+    client.println("Opções:");
+    client.println("  -h  Mostra esta ajuda");
+}
+
+String TelnetCommands::styleText(const String &text, const String &colorName, bool bold, bool italic) {
+    String colorCode = getAnsiColorCode(colorName);
+    String styleCode = "";
+
+    if (bold)
+        styleCode += "\033[1m";
+    if (italic)
+        styleCode += "\033[3m";
+
+    return styleCode + colorCode + text + "\033[0m";
+}
+
+String TelnetCommands::getAnsiColorCode(const String &colorName) {
+    if (colorName == "black")
+        return "\033[30m";
+    if (colorName == "red")
+        return "\033[31m";
+    if (colorName == "green")
+        return "\033[32m";
+    if (colorName == "yellow")
+        return "\033[33m";
+    if (colorName == "blue")
+        return "\033[34m";
+    if (colorName == "magenta")
+        return "\033[35m";
+    if (colorName == "cyan")
+        return "\033[36m";
+    if (colorName == "white")
+        return "\033[37m";
+    return ""; // default sem cor
 }

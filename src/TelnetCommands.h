@@ -16,7 +16,14 @@ class TelnetCommands {
     static void handleChangeDir(WiFiClient &client, const String &cmd);
     static void handleClearScreen(WiFiClient &client, const String &);
     static void handlePrintWorkingDir(WiFiClient &client, const String &);
+    static void handleCatCommand(WiFiClient &client, const String &cmd);
     static void handleUnknownCommand(WiFiClient &client, const String &);
+    static void handleExitCommand(WiFiClient &client, const String &cmd);
+
+    // helps
+    static void helpChangeDir(WiFiClient &client);
+    static void helpCatCommand(WiFiClient &client);
+    static void helpExitCommand(WiFiClient &client);
 
     // Variável estática para armazenar o diretório atual
     static String currentDirectory;
@@ -32,6 +39,9 @@ class TelnetCommands {
     static void changeToRootDir();
 
     static void findPartialPath(WiFiClient &client, const String &target);
+
+    static String styleText(const String &text, const String &colorName, bool bold = false, bool italic = false);
+    static String getAnsiColorCode(const String &colorName);
 };
 
 #endif // TELNET_COMMANDS_H
