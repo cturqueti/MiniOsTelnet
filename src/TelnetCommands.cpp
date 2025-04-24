@@ -11,7 +11,8 @@ void TelnetCommands::setupDefaultCommands(TelnetServer &server) {
     server.setWelcomeMessage("\033[1;32mBem-vindo ao servidor Telnet\033[0m\r\n"
                              "Digite 'help' para lista de comandos\r\n\r\n");
 
-    updatePrompt(*activeServer);
+    activeServer = &server;
+    updatePrompt(server);
     // server.enableEcho(false);
     server.setTabHandler(handleTabCompletion); // Configura o handler de TAB
 
