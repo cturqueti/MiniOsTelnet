@@ -3,14 +3,14 @@
 // Inicializa a variável estática
 String TelnetCommands::currentDirectory = "/";
 
-static TelnetCommands *currentServer = nullptr;
+static TelnetServer *activeServer = nullptr;
 
 void TelnetCommands::setupDefaultCommands(TelnetServer &server) {
     // Configurações básicas
     server.setWelcomeMessage("Bem-vindo ao servidor Telnet\r\n"
                              "Digite 'help' para lista de comandos\r\n\r\n");
 
-    currentServer = &server;
+    activeServer = &server;
     server.setPrompt("> ");
     server.enableEcho(false);
 
