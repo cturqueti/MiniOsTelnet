@@ -52,9 +52,12 @@ void TelnetServer::stop() {
 
 // Atualiza o estado do servidor
 void TelnetServer::update() {
+    // logMutexAction("Tentando travar", __FUNCTION__);
     std::lock_guard<std::mutex> lock(_mutex);
+    // logMutexAction("Travado", __FUNCTION__);
     handleNewConnections();
     handleExistingClients();
+    // logMutexAction("Liberando", __FUNCTION__);
 }
 
 // Manipula novas conexões
@@ -111,6 +114,9 @@ void TelnetServer::handleExistingClients() {
 
 // Manipula um cliente específico
 void TelnetServer::handleClient(ClientContext &context) {
+    // if (_logEnabled) {
+    //     LOG_DEBUG("[TELNET] Iniciando manipulação do cliente %s", context.client.remoteIP().toString().c_str());
+    // }
     while (context.client.available()) {
         char c = context.client.read();
         context.lastActivity = millis();
@@ -129,6 +135,9 @@ void TelnetServer::handleClient(ClientContext &context) {
             context.client.write(c);
         }
     }
+    // if (_logEnabled) {
+    //     LOG_DEBUG("[TELNET] Fim da manipulação do cliente %s", context.client.remoteIP().toString().c_str());
+    // }
 }
 
 // Processa o buffer de comando
@@ -161,38 +170,66 @@ void TelnetServer::processBuffer(ClientContext &context) {
 
 // Adiciona um novo comando
 void TelnetServer::addCommand(const String &command, CommandHandler handler) {
+    logMutexAction("Tentando travar", __FUNCTION__);
     std::lock_guard<std::mutex> lock(_mutex);
+    logMutexAction("Travado", __FUNCTION__);
     _commandHandlers[command] = handler;
+    logMutexAction("Liberando", __FUNCTION__);
 }
 
 // Remove um comando
 void TelnetServer::removeCommand(const String &command) {
+    logMutexAction("Tentando travar", __FUNCTION__);
     std::lock_guard<std::mutex> lock(_mutex);
+    logMutexAction("Travado", __FUNCTION__);
     _commandHandlers.erase(command);
+    logMutexAction("Liberando", __FUNCTION__);
 }
 
 // Define o handler padrão
 void TelnetServer::setDefaultHandler(CommandHandler handler) {
+    logMutexAction("Tentando travar", __FUNCTION__);
     std::lock_guard<std::mutex> lock(_mutex);
+    logMutexAction("Travado", __FUNCTION__);
     _defaultHandler = handler;
+    logMutexAction("Liberando", __FUNCTION__);
 }
 
 // Define a mensagem de boas-vindas
 void TelnetServer::setWelcomeMessage(const String &message) {
+    logMutexAction("Tentando travar", __FUNCTION__);
     std::lock_guard<std::mutex> lock(_mutex);
+    logMutexAction("Travado", __FUNCTION__);
     _welcomeMessage = message;
+    logMutexAction("Liberando", __FUNCTION__);
 }
 
 // Define o prompt
 void TelnetServer::setPrompt(const String &prompt) {
-    std::lock_guard<std::mutex> lock(_mutex);
+    // std::lock_guard<std::mutex> lock(_mutex);
     _prompt = prompt;
+
+    if (_logEnabled) {
+        LOG_INFO("[TELNET] Prompt atualizado: %s", _prompt.c_str());
+    }
+
+    // Força atualização imediata para todos os clientes
+    // for (auto &client : _clients) {
+    //     if (client.client.connected()) {
+    //         client.client.print("\r\n"); // Nova linha
+    //         client.client.print(_prompt);
+    //         client.client.clear();
+    //     }
+    // }
 }
 
 // Habilita/desabilita eco
 void TelnetServer::enableEcho(bool enable) {
+    logMutexAction("Tentando travar", __FUNCTION__);
     std::lock_guard<std::mutex> lock(_mutex);
+    logMutexAction("Travado", __FUNCTION__);
     _echoEnabled = enable;
+    logMutexAction("Liberando", __FUNCTION__);
 }
 
 // Número de clientes conectados
@@ -203,11 +240,14 @@ size_t TelnetServer::getClientCount() const {
 
 // Desconecta todos os clientes
 void TelnetServer::disconnectAllClients() {
+    logMutexAction("Tentando travar", __FUNCTION__);
     std::lock_guard<std::mutex> lock(_mutex);
+    logMutexAction("Travado", __FUNCTION__);
     for (auto &client : _clients) {
         disconnectClient(client, "Servidor sendo desligado...");
     }
     _clients.clear();
+    logMutexAction("Liberando", __FUNCTION__);
 }
 
 // Desconecta um cliente específico

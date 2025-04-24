@@ -9,6 +9,7 @@ class TelnetCommands {
     static void setupDefaultCommands(TelnetServer &server);
 
   private:
+    static bool _log;
     // Implementação dos handlers (pode ser movida para o .cpp se preferir)
     static void handleHelp(WiFiClient &client, const String &);
     static void handleListFiles(WiFiClient &client, const String &);
@@ -24,7 +25,13 @@ class TelnetCommands {
     static String resolvePath(const String &path);
     static bool isDirectory(const String &path);
 
-    void updatePrompt(TelnetServer &server);
+    static void updatePrompt(TelnetServer &server);
+
+    static void changeToParentDir();
+    static void changeToDirectory(const String &path);
+    static void changeToRootDir();
+
+    static void findPartialPath(WiFiClient &client, const String &target);
 };
 
 #endif // TELNET_COMMANDS_H

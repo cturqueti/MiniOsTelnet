@@ -4,6 +4,7 @@
 String TelnetCommands::currentDirectory = "/";
 
 static TelnetServer *activeServer = nullptr;
+bool TelnetCommands::_log = true;
 
 void TelnetCommands::setupDefaultCommands(TelnetServer &server) {
     // Configurações básicas
@@ -11,7 +12,7 @@ void TelnetCommands::setupDefaultCommands(TelnetServer &server) {
                              "Digite 'help' para lista de comandos\r\n\r\n");
 
     activeServer = &server;
-    server.setPrompt("> ");
+    updatePrompt(*activeServer);
     server.enableEcho(false);
 
     // Comandos básicos
@@ -67,24 +68,35 @@ void TelnetCommands::handleListFiles(WiFiClient &client, const String &cmd) {
 
 // Implementação do cd
 void TelnetCommands::handleChangeDir(WiFiClient &client, const String &cmd) {
+    if (activeServer == nullptr) {
+        if (_log)
+            LOG_ERROR("[CD] Erro: servidor não inicializado");
+        client.println("Erro interno do servidor");
+        return;
+    }
+
     if (cmd.length() <= 3) { // Apenas "cd" sem argumentos
-        currentDirectory = "/";
+        changeToRootDir();
+        updatePrompt(*activeServer);
         client.println("Diretório atual: /");
         return;
     }
 
-    String newPath = resolvePath(cmd.substring(3)); // Remove "cd "
+    // String target = resolvePath(cmd.substring(3)); // Remove "cd "
+    String target = cmd.substring(3);
+    if (target.endsWith("?")) {
+        findPartialPath(client, target);
+        return;
+    }
 
-    if (newPath == "..") {
-        int lastSlash = currentDirectory.lastIndexOf('/');
-        if (lastSlash > 0) {
-            currentDirectory = currentDirectory.substring(0, lastSlash);
-        } else {
-            currentDirectory = "/";
-        }
+    if (target == "..") {
+        changeToParentDir();
+        updatePrompt(*activeServer);
         client.printf("Diretório atual: %s\r\n", currentDirectory.c_str());
         return;
     }
+
+    String newPath = resolvePath(target);
 
     if (!LittleFS.exists(newPath)) {
         client.printf("Diretório não encontrado: %s\r\n", newPath.c_str());
@@ -96,8 +108,15 @@ void TelnetCommands::handleChangeDir(WiFiClient &client, const String &cmd) {
         return;
     }
 
-    currentDirectory = newPath;
+    changeToDirectory(newPath);
+    // currentDirectory = newPath;
+
+    if (_log == true) {
+        LOG_INFO("[CD] Mudou para: %s\n", currentDirectory.c_str());
+    }
+    updatePrompt(*activeServer);
     client.printf("Diretório atual: %s\r\n", currentDirectory.c_str());
+    client.clear();
 }
 
 // Implementação do pwd
@@ -146,6 +165,86 @@ void TelnetCommands::handleUnknownCommand(WiFiClient &client, const String &cmd)
 }
 
 void TelnetCommands::updatePrompt(TelnetServer &server) {
+    // if (_log == true) {
+    //     LOG_DEBUG("[CD] Checkpoint 1");
+    // }
     // Atualiza o prompt com o diretório atual (pode ser chamado após mudar de diretório)
     server.setPrompt("\033[1;34m" + currentDirectory + "> \033[0m");
+}
+
+void TelnetCommands::changeToParentDir() {
+    int lastSlash = currentDirectory.lastIndexOf('/');
+    if (lastSlash > 0) {
+        currentDirectory = currentDirectory.substring(0, lastSlash);
+    } else {
+        currentDirectory = "/";
+    }
+
+    if (currentDirectory.length() == 0) {
+        currentDirectory = "/";
+    }
+
+    if (_log)
+        LOG_INFO("[CD] Mudou para: %s\n", currentDirectory.c_str());
+}
+
+void TelnetCommands::changeToDirectory(const String &path) {
+    currentDirectory = path;
+    if (_log)
+        LOG_INFO("[CD] Mudou para: %s\n", currentDirectory.c_str());
+}
+
+void TelnetCommands::changeToRootDir() {
+    currentDirectory = "/";
+    if (_log)
+        LOG_INFO("[CD] Mudou para: /\n");
+}
+
+void TelnetCommands::findPartialPath(WiFiClient &client, const String &target) {
+    String partial = target.substring(0, target.length() - 1);
+    String basePath = resolvePath(partial);
+
+    client.println("Opções disponíveis:");
+
+    if (_log == true) {
+        LOG_INFO("[CD] Buscando: %s\n", basePath.c_str());
+    }
+
+    // Listar diretórios no caminho base que começam com o padrão parcial
+    File root = LittleFS.open(currentDirectory);
+    if (!root) {
+        client.println("  Nenhum diretório encontrado");
+        return;
+    }
+
+    if (!root.isDirectory()) {
+        client.println("  Caminho atual não é um diretório");
+        root.close();
+        return;
+    }
+
+    File file = root.openNextFile();
+    bool found = false;
+    while (file) {
+        if (file.isDirectory()) {
+            String fileName = file.name();
+            // Extrai apenas o nome do diretório (última parte do caminho)
+            int lastSlash = fileName.lastIndexOf('/');
+            String dirName = lastSlash >= 0 ? fileName.substring(lastSlash + 1) : fileName;
+
+            // Se partial não está vazio, verifica se o diretório começa com o padrão
+            if (partial.length() == 0 || dirName.startsWith(partial)) {
+                client.printf("  %s/\r\n", dirName.c_str());
+                found = true;
+            }
+        }
+        file = root.openNextFile();
+    }
+
+    if (!found) {
+        client.println("  Nenhum diretório correspondente encontrado");
+    }
+
+    root.close();
+    return;
 }

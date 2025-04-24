@@ -42,10 +42,17 @@ class TelnetServer {
     size_t getClientCount() const;
     void disconnectAllClients();
 
+    void logMutexAction(const char *action, const char *function) {
+        if (_logEnabled) {
+            LOG_DEBUG("[MUTEX] %s em %s", action, function);
+        }
+    }
+
   private:
     struct ClientContext {
         WiFiClient client;
         String buffer;
+        String currentInput;
         uint32_t lastActivity;
         bool authenticated;
     };
