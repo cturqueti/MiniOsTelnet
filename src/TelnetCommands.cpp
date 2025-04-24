@@ -1,5 +1,7 @@
 #include "TelnetCommands.h"
 
+Preferences TelnetCommands::preferences;
+
 // Inicializa a variável estática
 String TelnetCommands::currentDirectory = "/";
 
@@ -21,6 +23,7 @@ void TelnetCommands::setupDefaultCommands(TelnetServer &server) {
     server.addCommand("cd", handleChangeDir);
     server.addCommand("pwd", handlePrintWorkingDir);
     server.addCommand("cat", handleCatCommand);
+    server.addCommand("nvs", handleNvsCommand);
     server.addCommand("clear", handleClearScreen);
     server.addCommand("exit", handleExitCommand);
 
@@ -43,6 +46,9 @@ void TelnetCommands::handleHelp(WiFiClient &client, const String &) {
                           styleText("Mostra o diretório atual", "cyan", false, false)));
     client.println(String(styleText("cat [file]", "white", true, false) + "    - " +
                           styleText("Exibe conteúdo de arquivos", "cyan", false, false)));
+    client.println(String(styleText("nvs -[command] [file] [data]", "white", true, false) + "    - " +
+                          styleText("Exibe conteúdo de arquivos", "cyan", false, false)));
+
     client.println(String(styleText("clear", "white", true, false) + "         - " +
                           styleText("Limpa a tela", "cyan", false, false)));
     client.println(String(styleText("exit", "white", true, false) + "          - " +
@@ -60,19 +66,20 @@ void TelnetCommands::handleListFiles(WiFiClient &client, const String &cmd) {
     }
 
     if (!LittleFS.exists(path)) {
-        client.printf("Diretório não encontrado: %s\r\n", path.c_str());
+        client.println(styleText("Diretório não encontrado: ", "red", true) + path);
         return;
     }
 
-    client.printf("Conteúdo de %s:\r\n", path.c_str());
+    client.println(styleText("Conteúdo de ", "yellow", true) + path + ":");
     File dir = LittleFS.open(path);
     File file = dir.openNextFile();
 
     while (file) {
         if (file.isDirectory()) {
-            client.printf("[DIR]  %-20s\r\n", file.name());
+            client.printf("%s\r\n", styleText("[DIR]  " + String(file.name()), "blue", true).c_str());
         } else {
-            client.printf("%-20s %8d bytes\r\n", file.name(), file.size());
+            String line = String(file.name()) + " " + String(file.size()) + " bytes";
+            client.printf("%s\r\n", styleText(line, "white").c_str());
         }
         file = dir.openNextFile();
     }
@@ -84,7 +91,7 @@ void TelnetCommands::handleChangeDir(WiFiClient &client, const String &cmd) {
     if (activeServer == nullptr) {
         if (_log)
             LOG_ERROR("[CD] Erro: servidor não inicializado");
-        client.println("Erro interno do servidor");
+        client.println(styleText("Erro interno do servidor", "red", true));
         return;
     }
 
@@ -96,7 +103,7 @@ void TelnetCommands::handleChangeDir(WiFiClient &client, const String &cmd) {
     if (cmd.length() <= 3) { // Apenas "cd" sem argumentos
         changeToRootDir();
         updatePrompt(*activeServer);
-        client.println("Diretório atual: /");
+        client.println(styleText("Diretório atual: /", "green"));
         return;
     }
 
@@ -110,19 +117,19 @@ void TelnetCommands::handleChangeDir(WiFiClient &client, const String &cmd) {
     if (target == "..") {
         changeToParentDir();
         updatePrompt(*activeServer);
-        client.printf("Diretório atual: %s\r\n", currentDirectory.c_str());
+        client.println(styleText("Diretório atual: " + currentDirectory, "green"));
         return;
     }
 
     String newPath = resolvePath(target);
 
     if (!LittleFS.exists(newPath)) {
-        client.printf("Diretório não encontrado: %s\r\n", newPath.c_str());
+        client.println(styleText("Diretório não encontrado: " + newPath, "red", true));
         return;
     }
 
     if (!isDirectory(newPath)) {
-        client.printf("%s não é um diretório\r\n", newPath.c_str());
+        client.println(styleText(newPath + " não é um diretório", "red", true));
         return;
     }
 
@@ -133,14 +140,14 @@ void TelnetCommands::handleChangeDir(WiFiClient &client, const String &cmd) {
         LOG_INFO("[CD] Mudou para: %s\n", currentDirectory.c_str());
     }
     updatePrompt(*activeServer);
-    client.printf("Diretório atual: %s\r\n", currentDirectory.c_str());
+    client.println(styleText("Diretório atual: " + currentDirectory, "green"));
     client.clear();
 }
 
 // Implementação do cat
 void TelnetCommands::handleCatCommand(WiFiClient &client, const String &cmd) {
     if (cmd.length() <= 4) { // Apenas "cat" sem argumentos
-        client.println("Uso: cat <arquivo>");
+        client.println(styleText("Uso: cat <arquivo>", "yellow", true));
         client.println("Exibe o conteúdo de um arquivo");
         return;
     }
@@ -152,7 +159,7 @@ void TelnetCommands::handleCatCommand(WiFiClient &client, const String &cmd) {
 
     // Verifica se o usuário pediu versão (cat -v)
     if (pathArg == "-v") {
-        client.println("cat versão 1.0");
+        client.println(styleText("cat versão 1.0", "cyan"));
         client.println("Suporta exibição de arquivos texto e binários");
         return;
     }
@@ -160,26 +167,28 @@ void TelnetCommands::handleCatCommand(WiFiClient &client, const String &cmd) {
     // Verifica se o usuário pediu ajuda (cat -h)
     if (pathArg == "-h") {
         helpCatCommand(client);
+        return;
     }
 
     if (!LittleFS.exists(filePath)) {
-        client.printf("Arquivo não encontrado: %s\r\n", filePath.c_str());
+        client.println(styleText("Arquivo não encontrado: " + filePath, "red", true));
         return;
     }
 
     if (isDirectory(filePath)) {
-        client.printf("%s é um diretório, não um arquivo\r\n", filePath.c_str());
+        client.println(styleText(filePath + " é um diretório, não um arquivo", "red", true));
         return;
     }
 
     File file = LittleFS.open(filePath, "r");
     if (!file) {
-        client.printf("Erro ao abrir o arquivo: %s\r\n", filePath.c_str());
+        client.println(styleText("Erro ao abrir o arquivo: " + filePath, "red", true));
         return;
     }
 
-    client.printf("Conteúdo de %s:\r\n", filePath.c_str());
-    client.println("--------------------------------------------------");
+    client.println(styleText("Conteúdo de " + filePath + ":", "green"));
+    client.println(
+        styleText("--------------------------------------------------", "white", false, true)); // itálico branco
 
     // Lê e envia o arquivo em chunks para evitar sobrecarregar a memória
     const size_t bufferSize = 256;
@@ -190,10 +199,143 @@ void TelnetCommands::handleCatCommand(WiFiClient &client, const String &cmd) {
         client.write(buffer, bytesRead);
     }
 
-    client.println("\r\n--------------------------------------------------");
-    client.printf("Fim do arquivo (%d bytes)\r\n", file.size());
+    client.println(styleText("\r\n--------------------------------------------------", "white", false, true));
+    client.println(styleText("Fim do arquivo (" + String(file.size()) + " bytes)", "green"));
 
     file.close();
+}
+
+void TelnetCommands::handleNvsCommand(WiFiClient &client, const String &cmd) {
+
+    String args = cmd.substring(4); // remove "nvsget "
+    args.trim();
+
+    if (args == "-h" || args.length() == 0) {
+        client.println(styleText("Uso: ", "green", true) + "nvsget <chave>");
+        client.println("Exibe o valor armazenado na NVS para a chave fornecida.");
+        client.println(styleText("Exemplo: ", "green", true) + "nvsget wifi_ssid");
+        return;
+    }
+
+    if (args.startsWith("-rd")) {
+        String nameSpace = args.substring(4);
+        String key;
+        if (_log == true) {
+            LOG_INFO("nvsget -r %s\n", nameSpace.c_str());
+        }
+        // Remover o prefixo "-r" e depois dividir os argumentos restantes em namespace e chave
+
+        String remainingArgs = args.substring(3);
+        remainingArgs.trim();
+
+        int spaceIndex = remainingArgs.indexOf(" ");
+        if (spaceIndex != -1) {
+            nameSpace = remainingArgs.substring(0, spaceIndex);
+            key = remainingArgs.substring(spaceIndex + 1);
+        } else {
+            client.println(styleText("Erro: ", "red", true) + "Faltando chave ou namespace.");
+            return;
+        }
+
+        // Abrir o namespace e tentar ler o valor da chave
+        preferences.begin(nameSpace.c_str(), true);
+
+        if (!preferences.isKey(key.c_str())) {
+            client.printf("Chave '%s' não encontrada no namespace '%s'.\r\n", key.c_str(), nameSpace.c_str());
+            preferences.end();
+            return;
+        }
+
+        String value = preferences.getString(key.c_str(), "[vazio]");
+        client.printf("Valor de '%s' no namespace '%s': %s\r\n", styleText(key, "green", true, false).c_str(),
+                      styleText(nameSpace, "green", true, false).c_str(),
+                      styleText(value, "green", true, false).c_str());
+        preferences.end();
+        return;
+    }
+
+    if (args.startsWith("-s")) { // Formato: nvs -s <namespace> <chave=valor>
+        String nameSpace;
+        String key;
+        String value;
+
+        // Remove "-s " e divide em partes
+        String remainingArgs = args.substring(3); // Remove "-s "
+        remainingArgs.trim();
+
+        // Encontra o primeiro espaço (separando namespace do restante)
+        int spaceIndex = remainingArgs.indexOf(' ');
+        if (spaceIndex == -1) {
+            client.println(styleText("Erro: ", "red", true) +
+                           "Formato inválido. Use: nvs -s <namespace> <chave=valor>");
+            return;
+        }
+
+        // Extrai o namespace (parte antes do espaço)
+        nameSpace = remainingArgs.substring(0, spaceIndex);
+
+        // Extrai a parte "chave=valor" (após o namespace)
+        String keyValuePart = remainingArgs.substring(spaceIndex + 1);
+        keyValuePart.trim();
+
+        // Divide "chave=valor" em chave e valor
+        int equalsIndex = keyValuePart.indexOf('=');
+        if (equalsIndex == -1) {
+            client.println(styleText("Erro: ", "red", true) +
+                           "Formato inválido. Use: nvs -s <namespace> <chave=valor>");
+            return;
+        }
+
+        key = keyValuePart.substring(0, equalsIndex);
+        value = keyValuePart.substring(equalsIndex + 1);
+
+        if (_log) {
+            LOG_INFO("nvs -s %s %s=%s\n", nameSpace.c_str(), key.c_str(), value.c_str());
+        }
+
+        // Abre o namespace NVS
+        preferences.begin(nameSpace.c_str(), false);
+
+        // Verifica se a chave já existe e pede confirmação para sobrescrever
+        if (preferences.isKey(key.c_str())) {
+
+            client.printf("%s A chave '%s' já existe no namespace '%s'.\r\n"
+                          "Valor atual: %s\r\n"
+                          "%s\r\n",
+                          styleText("AVISO: ", "yellow", true).c_str(), styleText(key, "green").c_str(),
+                          styleText(nameSpace, "green").c_str(),
+                          styleText(preferences.getString(key.c_str(), ""), "yellow").c_str(),
+                          styleText("Deseja sobrescrever? (S/N)", "yellow", true).c_str());
+            // client.println(buffer);
+            client.clear();
+
+            unsigned long startTime = millis();
+            while (millis() - startTime < 5000) { // Timeout de 5 segundos
+                if (client.available()) {
+                    char response = client.read();
+                    if (response != 's' && response != 'S') {
+                        client.println(styleText("Operação cancelada.", "yellow", true));
+                        preferences.end();
+                        return;
+                    } else {
+                        preferences.putString(key.c_str(), value.c_str());
+                        preferences.end();
+
+                        client.printf("%s Chave '%s' definida como '%s' no namespace '%s'.\r\n",
+                                      styleText("SUCESSO: ", "green", true).c_str(), styleText(key, "green").c_str(),
+                                      styleText(value, "green").c_str(), styleText(nameSpace, "green").c_str());
+                        return;
+                    }
+                }
+                delay(50);
+            }
+
+            client.println(styleText("Tempo limite atingido. Operação cancelada.", "yellow", true));
+            preferences.end();
+            return;
+        }
+    }
+    client.println(styleText("Não foi selecionado uma opção verifique o help -h ", "yellow", true));
 }
 
 // Implementação do pwd
@@ -213,7 +355,7 @@ void TelnetCommands::handleExitCommand(WiFiClient &client, const String &cmd) {
     }
 
     // Confirmação (opcional)
-    client.println("Tem certeza que deseja sair? (s/n)");
+    client.println(styleText("Tem certeza que deseja sair? (S/N)", "yellow", true));
     client.clear();
 
     // Aguarda resposta (opcional)
@@ -222,7 +364,7 @@ void TelnetCommands::handleExitCommand(WiFiClient &client, const String &cmd) {
         if (client.available()) {
             char response = client.read();
             if (response == 's' || response == 'S') {
-                client.println("Desconectando... Adeus!");
+                client.println(styleText("Desconectando... Adeus!", "magenta", true));
                 if (_log) {
                     LOG_INFO("[TELNET] Cliente desconectado via comando exit");
                 }
@@ -230,14 +372,14 @@ void TelnetCommands::handleExitCommand(WiFiClient &client, const String &cmd) {
                 client.stop();
                 return;
             } else {
-                client.println("Cancelado.");
+                client.println(styleText("Cancelado.", "cyan", true));
                 return;
             }
         }
         delay(50);
     }
 
-    client.println("Timeout. Comando cancelado.");
+    client.println(styleText("Timeout. Comando cancelado.", "red", true));
 }
 
 // Métodos auxiliares
@@ -275,8 +417,8 @@ void TelnetCommands::handleClearScreen(WiFiClient &client, const String &) {
 
 void TelnetCommands::handleUnknownCommand(WiFiClient &client, const String &cmd) {
     client.println();
-    client.printf("Comando desconhecido: '%s'\r\n", cmd.c_str());
-    client.println("Digite 'help' para ver os comandos disponíveis");
+    client.println(styleText("Comando desconhecido: '" + cmd + "'", "red", true));
+    client.println(styleText("Digite 'help' para ver os comandos disponíveis", "yellow", true));
     client.println();
 }
 
@@ -320,7 +462,7 @@ void TelnetCommands::findPartialPath(WiFiClient &client, const String &target) {
     String partial = target.substring(0, target.length() - 1);
     String basePath = resolvePath(partial);
 
-    client.println("Opções disponíveis:");
+    client.println(styleText("Opções disponíveis:", "yellow", true));
 
     if (_log == true) {
         LOG_INFO("[CD] Buscando: %s\n", basePath.c_str());
@@ -329,12 +471,12 @@ void TelnetCommands::findPartialPath(WiFiClient &client, const String &target) {
     // Listar diretórios no caminho base que começam com o padrão parcial
     File root = LittleFS.open(currentDirectory);
     if (!root) {
-        client.println("  Nenhum diretório encontrado");
+        client.println(styleText("  Nenhum diretório encontrado", "red", true));
         return;
     }
 
     if (!root.isDirectory()) {
-        client.println("  Caminho atual não é um diretório");
+        client.println(styleText("  Caminho atual não é um diretório", "red", true));
         root.close();
         return;
     }
@@ -350,7 +492,8 @@ void TelnetCommands::findPartialPath(WiFiClient &client, const String &target) {
 
             // Se partial não está vazio, verifica se o diretório começa com o padrão
             if (partial.length() == 0 || dirName.startsWith(partial)) {
-                client.printf("  %s/\r\n", dirName.c_str());
+                client.println(styleText("  " + dirName + "/", "cyan", true));
+                // client.printf("  %s/\r\n");
                 found = true;
             }
         }
@@ -358,7 +501,7 @@ void TelnetCommands::findPartialPath(WiFiClient &client, const String &target) {
     }
 
     if (!found) {
-        client.println("  Nenhum diretório correspondente encontrado");
+        client.println(styleText("  Nenhum diretório correspondente encontrado", "red", true));
     }
 
     root.close();
@@ -366,38 +509,43 @@ void TelnetCommands::findPartialPath(WiFiClient &client, const String &target) {
 }
 
 void TelnetCommands::helpChangeDir(WiFiClient &client) {
-    client.println("Ajuda do comando cd:");
-    client.println("Uso: cd [diretório]");
-    client.println("Opções:");
-    client.println("  -h          Mostra esta ajuda");
-    client.println("  ..          Volta para o diretório pai");
-    client.println("  /           Vai para o diretório raiz");
-    client.println("  [nome]?     Lista diretórios que começam com [nome]");
-    client.println("Exemplos:");
-    client.println("  cd /        Vai para o diretório raiz");
-    client.println("  cd dir      Entra no diretório 'dir'");
-    client.println("  cd ..       Volta um diretório");
-    client.println("  cd abc?     Lista diretórios começando com 'abc'");
+    client.println(styleText("Ajuda do comando cd:", "yellow", true));
+    client.println(styleText("Uso: ", "green", true) + "cd [diretório]");
+
+    client.println(styleText("Opções:", "green", true));
+    client.println(styleText("  -h", "cyan", true) + "          Mostra esta ajuda");
+    client.println(styleText("  ..", "cyan", true) + "          Volta para o diretório pai");
+    client.println(styleText("  /", "cyan", true) + "           Vai para o diretório raiz");
+    client.println(styleText("  [nome]?", "cyan", true) + "     Lista diretórios que começam com [nome]");
+
+    client.println(styleText("Exemplos:", "green", true));
+    client.println(styleText("  cd /", "white") + "        Vai para o diretório raiz");
+    client.println(styleText("  cd dir", "white") + "      Entra no diretório 'dir'");
+    client.println(styleText("  cd ..", "white") + "       Volta um diretório");
+    client.println(styleText("  cd abc?", "white") + "     Lista diretórios começando com 'abc'");
 }
 
 void TelnetCommands::helpCatCommand(WiFiClient &client) {
-    client.println("Ajuda do comando cat:");
-    client.println("Uso: cat <arquivo>");
-    client.println("Opções:");
-    client.println("  -h          Mostra esta ajuda");
-    client.println("  -v          Mostra a versão do cat");
-    client.println("  [arquivo]   Exibe o conteúdo do arquivo especificado");
-    client.println("Exemplos:");
-    client.println("  cat /dados/config.txt  Exibe o arquivo config.txt");
-    client.println("  cat teste.log          Exibe o arquivo teste.log no diretório atual");
+    client.println(styleText("Ajuda do comando cat:", "yellow", true));
+    client.println(styleText("Uso: ", "green", true) + "cat <arquivo>");
+
+    client.println(styleText("Opções:", "green", true));
+    client.println(styleText("  -h", "cyan", true) + "          Mostra esta ajuda");
+    client.println(styleText("  -v", "cyan", true) + "          Mostra a versão do cat");
+    client.println(styleText("  [arquivo]", "cyan", true) + "   Exibe o conteúdo do arquivo especificado");
+
+    client.println(styleText("Exemplos:", "green", true));
+    client.println(styleText("  cat /dados/config.txt", "white") + "  Exibe o arquivo config.txt");
+    client.println(styleText("  cat teste.log", "white") + "          Exibe o arquivo teste.log no diretório atual");
 }
 
 void TelnetCommands::helpExitCommand(WiFiClient &client) {
-    client.println("Ajuda do comando exit:");
-    client.println("Uso: exit");
+    client.println(styleText("Ajuda do comando exit:", "yellow", true));
+    client.println(styleText("Uso: ", "green", true) + "exit");
     client.println("Encerra a sessão Telnet atual");
-    client.println("Opções:");
-    client.println("  -h  Mostra esta ajuda");
+
+    client.println(styleText("Opções:", "green", true));
+    client.println(styleText("  -h", "cyan", true) + "  Mostra esta ajuda");
 }
 
 String TelnetCommands::styleText(const String &text, const String &colorName, bool bold, bool italic) {

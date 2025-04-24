@@ -3,6 +3,7 @@
 
 #include "TelnetServer.h"
 #include <LittleFS.h>
+#include <Preferences.h>
 
 class TelnetCommands {
   public:
@@ -10,6 +11,8 @@ class TelnetCommands {
 
   private:
     static bool _log;
+    static Preferences preferences;
+
     // Implementação dos handlers (pode ser movida para o .cpp se preferir)
     static void handleHelp(WiFiClient &client, const String &);
     static void handleListFiles(WiFiClient &client, const String &);
@@ -17,6 +20,7 @@ class TelnetCommands {
     static void handleClearScreen(WiFiClient &client, const String &);
     static void handlePrintWorkingDir(WiFiClient &client, const String &);
     static void handleCatCommand(WiFiClient &client, const String &cmd);
+    static void handleNvsCommand(WiFiClient &client, const String &cmd);
     static void handleUnknownCommand(WiFiClient &client, const String &);
     static void handleExitCommand(WiFiClient &client, const String &cmd);
 
