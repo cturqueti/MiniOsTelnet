@@ -8,7 +8,7 @@ void TelnetCommands::setupDefaultCommands(TelnetServer &server) {
     server.setWelcomeMessage("Bem-vindo ao servidor Telnet\r\n"
                              "Digite 'help' para lista de comandos\r\n\r\n");
 
-    server.setPrompt(currentDirectory + "> ");
+    server.setPrompt("> ");
     server.enableEcho(false);
 
     // Comandos básicos
