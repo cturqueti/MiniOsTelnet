@@ -4,6 +4,8 @@
 #include "TelnetServer.h"
 #include <LittleFS.h>
 #include <Preferences.h>
+#include <WiFi.h>
+#include <mdns.h>
 
 class TelnetCommands {
   public:
@@ -21,12 +23,15 @@ class TelnetCommands {
     static void handlePrintWorkingDir(WiFiClient &client, const String &);
     static void handleCatCommand(WiFiClient &client, const String &cmd);
     static void handleNvsCommand(WiFiClient &client, const String &cmd);
+    static void handleIfConfigCommand(WiFiClient &client, const String &cmd);
     static void handleUnknownCommand(WiFiClient &client, const String &);
     static void handleExitCommand(WiFiClient &client, const String &cmd);
 
     // helps
     static void helpChangeDir(WiFiClient &client);
     static void helpCatCommand(WiFiClient &client);
+    static void helpNvsCommand(WiFiClient &client);
+    static void helpIfConfigCommand(WiFiClient &client);
     static void helpExitCommand(WiFiClient &client);
 
     // Variável estática para armazenar o diretório atual

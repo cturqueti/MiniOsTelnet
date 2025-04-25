@@ -24,6 +24,7 @@ void TelnetCommands::setupDefaultCommands(TelnetServer &server) {
     server.addCommand("pwd", handlePrintWorkingDir);
     server.addCommand("cat", handleCatCommand);
     server.addCommand("nvs", handleNvsCommand);
+    server.addCommand("ifconfig", handleIfConfigCommand);
     server.addCommand("clear", handleClearScreen);
     server.addCommand("exit", handleExitCommand);
 
@@ -46,7 +47,7 @@ void TelnetCommands::handleHelp(WiFiClient &client, const String &) {
                           styleText("Mostra o diretório atual", "cyan", false, false)));
     client.println(String(styleText("cat [file]", "white", true, false) + "    - " +
                           styleText("Exibe conteúdo de arquivos", "cyan", false, false)));
-    client.println(String(styleText("nvs -[command] [file] [data]", "white", true, false) + "    - " +
+    client.println(String(styleText("nvs -[command] [namespace] [data]", "white", true, false) + "    - " +
                           styleText("Exibe conteúdo de arquivos", "cyan", false, false)));
 
     client.println(String(styleText("clear", "white", true, false) + "         - " +
@@ -211,9 +212,7 @@ void TelnetCommands::handleNvsCommand(WiFiClient &client, const String &cmd) {
     args.trim();
 
     if (args == "-h" || args.length() == 0) {
-        client.println(styleText("Uso: ", "green", true) + "nvsget <chave>");
-        client.println("Exibe o valor armazenado na NVS para a chave fornecida.");
-        client.println(styleText("Exemplo: ", "green", true) + "nvsget wifi_ssid");
+        helpNvsCommand(client);
         return;
     }
 
@@ -221,7 +220,7 @@ void TelnetCommands::handleNvsCommand(WiFiClient &client, const String &cmd) {
         String nameSpace = args.substring(4);
         String key;
         if (_log == true) {
-            LOG_INFO("nvsget -r %s\n", nameSpace.c_str());
+            LOG_INFO("nvsget -rd %s\n", nameSpace.c_str());
         }
         // Remover o prefixo "-r" e depois dividir os argumentos restantes em namespace e chave
 
@@ -335,7 +334,82 @@ void TelnetCommands::handleNvsCommand(WiFiClient &client, const String &cmd) {
             return;
         }
     }
+
     client.println(styleText("Não foi selecionado uma opção verifique o help -h ", "yellow", true));
+}
+
+void TelnetCommands::handleIfConfigCommand(WiFiClient &client, const String &cmd) {
+    String args = cmd.substring(8); // remove "ifconfig"
+    args.trim();
+
+    if (args == "-h") {
+        helpIfConfigCommand(client);
+        return;
+    }
+
+    int wifiStatus = WiFi.status();
+
+    // Cabeçalho
+    client.println(styleText("\nInformações de Rede:", "yellow", true));
+    client.println(styleText("====================", "yellow"));
+
+    // Status da conexão WiFi
+    String statusText;
+    switch (wifiStatus) {
+    case WL_NO_SHIELD:
+        statusText = "No shield";
+        break;
+    case WL_IDLE_STATUS:
+        statusText = "Idle";
+        break;
+    case WL_NO_SSID_AVAIL:
+        statusText = "No SSID available";
+        break;
+    case WL_SCAN_COMPLETED:
+        statusText = "Scan completed";
+        break;
+    case WL_CONNECTED:
+        statusText = "Connected";
+        break;
+    case WL_CONNECT_FAILED:
+        statusText = "Connection failed";
+        break;
+    case WL_CONNECTION_LOST:
+        statusText = "Connection lost";
+        break;
+    case WL_DISCONNECTED:
+        statusText = "Disconnected";
+        break;
+    default:
+        statusText = "Unknown status";
+    }
+    client.printf("%s: %s\r\n", styleText("Status WiFi", "cyan", true).c_str(),
+                  styleText(statusText, wifiStatus == WL_CONNECTED ? "green" : "red", true).c_str());
+
+    // Informações quando conectado
+    if (wifiStatus == WL_CONNECTED) {
+        client.println(styleText("\nConfiguração IP:", "cyan", true));
+        client.printf("  %-10s: %s\r\n", "IP", styleText(WiFi.localIP().toString(), "green").c_str());
+        client.printf("  %-10s: %s\r\n", "Gateway", styleText(WiFi.gatewayIP().toString(), "green").c_str());
+        client.printf("  %-10s: %s\r\n", "Subnet", styleText(WiFi.subnetMask().toString(), "green").c_str());
+        client.printf("  %-10s: %s\r\n", "DNS", styleText(WiFi.dnsIP().toString(), "green").c_str());
+
+        client.println(styleText("\nInformações WiFi:", "cyan", true));
+        client.printf("  %-15s: %s\r\n", "SSID", styleText(WiFi.SSID(), "green").c_str());
+        client.printf("  %-15s: %s\r\n", "BSSID", styleText(WiFi.BSSIDstr(), "green").c_str());
+        client.printf("  %-15s: %d\r\n", "Canal", WiFi.channel());
+        client.printf("  %-15s: %d dBm\r\n", "RSSI", WiFi.RSSI());
+    }
+
+    // Informações da interface (mesmo desconectado)
+    client.println(styleText("\nInformações da Interface:", "cyan", true));
+    client.printf("  %-15s: %s\r\n", "MAC Address", styleText(WiFi.macAddress(), "green").c_str());
+
+    if (WiFi.getMode() & WIFI_AP) {
+        client.printf("  %-15s: %s\r\n", "AP IP", styleText(WiFi.softAPIP().toString(), "green").c_str());
+    }
+
+    client.println();
 }
 
 // Implementação do pwd
@@ -537,6 +611,42 @@ void TelnetCommands::helpCatCommand(WiFiClient &client) {
     client.println(styleText("Exemplos:", "green", true));
     client.println(styleText("  cat /dados/config.txt", "white") + "  Exibe o arquivo config.txt");
     client.println(styleText("  cat teste.log", "white") + "          Exibe o arquivo teste.log no diretório atual");
+}
+
+void TelnetCommands::helpNvsCommand(WiFiClient &client) {
+    client.println(styleText("Ajuda do comando nvs:", "yellow", true));
+    client.println(styleText("Uso: ", "green", true) + "cat -<comando> <namespace> <chave>=<valor>");
+
+    client.println(styleText("Opções:", "green", true));
+    client.println(styleText("  -h", "cyan", true) + "          Mostra esta ajuda");
+    client.println(styleText("  -rd [namespace] [chave]", "cyan", true) +
+                   "          Mostra o valor da chave armazenada no NVS");
+    client.println(styleText("  -s [namespace] [chave]=[valor]", "cyan", true) +
+                   "          Armazena o valor na chave do NVS");
+
+    client.println(styleText("Exemplos:", "green", true));
+    client.println(styleText("  nvs -rd default wifi", "white") +
+                   "            Exibe o valor de wifi no namespace default da NVS");
+    client.println(styleText("  nvs -s default wifi_ssid=teste", "white") +
+                   "          Salva o valor de wifi_ssid=teste no namespace default da NVS");
+
+    return;
+}
+
+void TelnetCommands::helpIfConfigCommand(WiFiClient &client) {
+    client.println(styleText("Ajuda do comando ifconfig:", "yellow", true));
+    client.println(styleText("Uso: ", "green", true) + "ifconfig");
+    client.println("Exibe informações detalhadas da interface de rede");
+
+    client.println(styleText("\nInformações exibidas:", "cyan", true));
+    client.println("  - Status da conexão WiFi");
+    client.println("  - Configuração IP (quando conectado)");
+    client.println("  - Informações da rede WiFi");
+    client.println("  - Endereço MAC");
+    client.println("  - Configuração do AP (se ativo)");
+
+    client.println(styleText("\nOpções:", "green", true));
+    client.println(styleText("  -h", "cyan", true) + "  Mostra esta ajuda");
 }
 
 void TelnetCommands::helpExitCommand(WiFiClient &client) {
