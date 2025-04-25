@@ -2,15 +2,18 @@
 #include <Arduino.h>
 
 // Construtor
-TelnetServer::TelnetServer(uint16_t port, bool logEnabled)
-    : _server(port), _port(port), _logEnabled(logEnabled), _running(false), _echoEnabled(false),
-      _welcomeMessage("Bem-vindo ao servidor Telnet\r\n"), _prompt("> ") {}
+TelnetServer::TelnetServer()
+    : _server(0, 2), _running(false), _echoEnabled(true), _welcomeMessage("Bem-vindo ao servidor Telnet\r\n"),
+      _prompt("> ") {}
 
 // Destrutor
 TelnetServer::~TelnetServer() { stop(); }
 
 // Inicia o servidor
-void TelnetServer::begin() {
+void TelnetServer::begin(String hostname, uint16_t port, bool logEnabled) {
+    _port = port;
+    _logEnabled = logEnabled;
+    _hostname = hostname;
     if (_running)
         return;
 
@@ -19,7 +22,7 @@ void TelnetServer::begin() {
         return;
     }
 
-    _server.begin();
+    _server.begin(_port);
     _running = true;
 
     xTaskCreatePinnedToCore([](void *param) { static_cast<TelnetServer *>(param)->taskFunction(); }, "TelnetServerTask",
@@ -120,8 +123,65 @@ void TelnetServer::handleClient(ClientContext &context) {
     while (context.client.available()) {
         char c = context.client.read();
         context.lastActivity = millis();
+        if (c == '\t') {
+            autoComplete(context);
+            return;
+        } else if (c == 0x08 || c == 0x7F) {
+            if (!filterTelnetCommands(context.buffer).isEmpty()) {
+                if (_logEnabled) {
+                    LOG_DEBUG("[TELNET] Apagando caractere");
+                    LOG_DEBUG("[TELNET] Buffer: %s", context.buffer.c_str());
+                }
+                // 1. Remove o último caractere do buffer
+                context.buffer.remove(context.buffer.length() - 1);
 
-        if (c == '\n' || c == '\r') {
+                // 2. Envia sequência de apagar
+                context.client.write(0x08); // Move cursor para trás
+                context.client.write(' ');  // Escreve espaço
+                context.client.write(0x08); // Move cursor para trás novamente
+
+                // 3. Se eco está desativado, precisamos atualizar o display manualmente
+                if (!_echoEnabled) {
+                    // Reimprime o prompt e o buffer atualizado
+                    context.client.print("\r" + _prompt + context.buffer);
+                }
+            } else {
+                // Buffer vazio - apenas envia um beep (opcional)
+                context.client.write(0x07);
+            }
+            return;
+        } else if (c == 0x1B) { // ESC detectado
+            // Aguarda os próximos dois caracteres se disponíveis
+            while (context.client.available() < 2)
+                delay(1);
+            char next1 = context.client.read();
+            char next2 = context.client.read();
+
+            if (next1 == '[' && next2 == 'A') {
+                // Seta para cima
+                if (context.historyIndex > 0) {
+                    context.historyIndex--;
+                    context.buffer = context.commandHistory[context.historyIndex];
+                    // Limpa a linha atual e reescreve o prompt + comando
+                    context.client.print("\r\033[K"); // Limpa a linha
+                    context.client.print(_prompt + context.buffer);
+                }
+                return; // Não processa mais nada neste loop
+            } else
+
+                if (next1 == '[' && next2 == 'B') {
+                if (context.historyIndex < (int)context.commandHistory.size() - 1) {
+                    context.historyIndex++;
+                    context.buffer = context.commandHistory[context.historyIndex];
+                } else {
+                    context.historyIndex = context.commandHistory.size();
+                    context.buffer = "";
+                }
+                context.client.print("\r\033[K");
+                context.client.print(_prompt + context.buffer);
+                return;
+            }
+        } else if (c == '\n' || c == '\r') {
             if (!context.buffer.isEmpty()) {
                 processBuffer(context);
                 context.buffer = "";
@@ -150,6 +210,12 @@ void TelnetServer::processBuffer(ClientContext &context) {
     String command = filterTelnetCommands(context.buffer);
     command.trim();
 
+    // Apenas adiciona ao histórico se não estiver vazio
+    if (!command.isEmpty()) {
+        context.commandHistory.push_back(command);
+        context.historyIndex = context.commandHistory.size(); // Reseta o índice para o final
+    }
+
     // Verifica comandos registrados
     bool commandHandled = false;
     for (const auto &handler : _commandHandlers) {
@@ -165,6 +231,7 @@ void TelnetServer::processBuffer(ClientContext &context) {
         _defaultHandler(context.client, command);
     }
 
+    context.buffer = ""; // Limpa o buffer para o próximo comando
     context.client.print(_prompt);
 }
 
@@ -212,15 +279,6 @@ void TelnetServer::setPrompt(const String &prompt) {
     if (_logEnabled) {
         LOG_INFO("[TELNET] Prompt atualizado: %s", _prompt.c_str());
     }
-
-    // Força atualização imediata para todos os clientes
-    // for (auto &client : _clients) {
-    //     if (client.client.connected()) {
-    //         client.client.print("\r\n"); // Nova linha
-    //         client.client.print(_prompt);
-    //         client.client.clear();
-    //     }
-    // }
 }
 
 // Habilita/desabilita eco
@@ -307,5 +365,24 @@ void TelnetServer::taskFunction() {
     while (_running) {
         update();
         vTaskDelay(pdMS_TO_TICKS(10));
+    }
+}
+
+void TelnetServer::autoComplete(ClientContext &context) {
+    String filtered = filterTelnetCommands(context.buffer);
+    if (_logEnabled) {
+        LOG_DEBUG("[TELNET] Autocomplete: %s", filtered.c_str());
+    }
+    if (context.buffer.isEmpty())
+        return;
+
+    for (const auto &handler : _commandHandlers) {
+        const String &cmd = handler.first;
+        if (cmd.startsWith(context.buffer)) {
+            context.buffer = cmd;
+            context.client.print("\r\033[K"); // limpa a linha
+            context.client.print(_prompt + context.buffer);
+            break;
+        }
     }
 }

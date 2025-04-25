@@ -20,11 +20,11 @@ class TelnetServer {
     static constexpr uint32_t CLIENT_TIMEOUT_MS = 300000; // 5 minutos
 
     // Construtor/Destrutor
-    TelnetServer(uint16_t port = 23, bool logEnabled = true);
+    TelnetServer();
     ~TelnetServer();
 
     // Controle do servidor
-    void begin();
+    void begin(String hostname, uint16_t port = 23, bool logEnabled = false);
     void stop();
     void update();
 
@@ -37,6 +37,8 @@ class TelnetServer {
     void setWelcomeMessage(const String &message);
     void setPrompt(const String &prompt);
     void enableEcho(bool enable);
+    inline bool isEchoEnabled() const { return _echoEnabled; }
+    String getMdnsHostname() const { return _hostname; }
 
     // Informação
     size_t getClientCount() const;
@@ -55,6 +57,8 @@ class TelnetServer {
         String currentInput;
         uint32_t lastActivity;
         bool authenticated;
+        std::vector<String> commandHistory; // Histórico de comandos
+        int historyIndex = -1;              // Índice do histórico para navegação
     };
 
     // Tratamento de clientes
@@ -68,11 +72,13 @@ class TelnetServer {
     bool isTelnetCommand(uint8_t c) const;
     String filterTelnetCommands(const String &input) const;
     void sendTelnetCommand(WiFiClient &client, uint8_t cmd, uint8_t option);
+    void autoComplete(ClientContext &context);
 
     // Thread/task
     void taskFunction();
 
     // Variáveis membro
+    String _hostname;
     WiFiServer _server;
     uint16_t _port;
     bool _logEnabled;

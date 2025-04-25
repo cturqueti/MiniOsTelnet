@@ -25,6 +25,7 @@ void TelnetCommands::setupDefaultCommands(TelnetServer &server) {
     server.addCommand("cat", handleCatCommand);
     server.addCommand("nvs", handleNvsCommand);
     server.addCommand("ifconfig", handleIfConfigCommand);
+    server.addCommand("ping", handlePingCommand);
     server.addCommand("clear", handleClearScreen);
     server.addCommand("exit", handleExitCommand);
 
@@ -33,6 +34,9 @@ void TelnetCommands::setupDefaultCommands(TelnetServer &server) {
 }
 
 void TelnetCommands::handleHelp(WiFiClient &client, const String &) {
+    if (activeServer->isEchoEnabled()) {
+        client.println();
+    }
     client.println(styleText("Comandos disponíveis:", "yellow", true, false));
     client.println();
 
@@ -49,7 +53,10 @@ void TelnetCommands::handleHelp(WiFiClient &client, const String &) {
                           styleText("Exibe conteúdo de arquivos", "cyan", false, false)));
     client.println(String(styleText("nvs -[command] [namespace] [data]", "white", true, false) + "    - " +
                           styleText("Exibe conteúdo de arquivos", "cyan", false, false)));
-
+    client.println(String(styleText("ifconfig", "white", true, false) + "     - " +
+                          styleText("Exibe informações de rede", "cyan", false, false)));
+    client.println(String(styleText("ping <hostname/IP> [tentativas]", "white", true, false) + " - " +
+                          styleText("Testa a conectividade de rede com outro dispositivo", "cyan", false, false)));
     client.println(String(styleText("clear", "white", true, false) + "         - " +
                           styleText("Limpa a tela", "cyan", false, false)));
     client.println(String(styleText("exit", "white", true, false) + "          - " +
@@ -71,6 +78,9 @@ void TelnetCommands::handleListFiles(WiFiClient &client, const String &cmd) {
         return;
     }
 
+    if (activeServer->isEchoEnabled()) {
+        client.println();
+    }
     client.println(styleText("Conteúdo de ", "yellow", true) + path + ":");
     File dir = LittleFS.open(path);
     File file = dir.openNextFile();
@@ -89,6 +99,9 @@ void TelnetCommands::handleListFiles(WiFiClient &client, const String &cmd) {
 
 // Implementação do cd
 void TelnetCommands::handleChangeDir(WiFiClient &client, const String &cmd) {
+    if (activeServer->isEchoEnabled()) {
+        client.println();
+    }
     if (activeServer == nullptr) {
         if (_log)
             LOG_ERROR("[CD] Erro: servidor não inicializado");
@@ -104,6 +117,9 @@ void TelnetCommands::handleChangeDir(WiFiClient &client, const String &cmd) {
     if (cmd.length() <= 3) { // Apenas "cd" sem argumentos
         changeToRootDir();
         updatePrompt(*activeServer);
+        if (activeServer->isEchoEnabled()) {
+            client.println();
+        }
         client.println(styleText("Diretório atual: /", "green"));
         return;
     }
@@ -147,6 +163,9 @@ void TelnetCommands::handleChangeDir(WiFiClient &client, const String &cmd) {
 
 // Implementação do cat
 void TelnetCommands::handleCatCommand(WiFiClient &client, const String &cmd) {
+    if (activeServer->isEchoEnabled()) {
+        client.println();
+    }
     if (cmd.length() <= 4) { // Apenas "cat" sem argumentos
         client.println(styleText("Uso: cat <arquivo>", "yellow", true));
         client.println("Exibe o conteúdo de um arquivo");
@@ -206,26 +225,50 @@ void TelnetCommands::handleCatCommand(WiFiClient &client, const String &cmd) {
     file.close();
 }
 
+/**
+ * @brief Comando nvs: manipula o armazenamento de chaves-valor no NVS (Non-Volatile Storage)
+ *
+ * Comandos:
+ *  nvs -h          - Ajuda
+ *  nvs -rd <namespace> <chave> - Leia o valor de uma chave
+ *  nvs -s <namespace> <chave=valor> - Defina o valor de uma chave
+ *  nvs -x <namespace> - Apague todo o namespace
+ */
 void TelnetCommands::handleNvsCommand(WiFiClient &client, const String &cmd) {
+    if (activeServer->isEchoEnabled()) {
+        client.println();
+    }
+    std::vector<String> args = splitCommand(cmd, ' ');
 
-    String args = cmd.substring(4); // remove "nvsget "
-    args.trim();
+    const String &operation = args[1];
 
-    if (args == "-h" || args.length() == 0) {
+    if (_log == true) {
+        LOG_DEBUG("[NVS] Command '%s'", args[0].c_str());
+        LOG_DEBUG("[NVS] Function '%s'", operation.c_str());
+        LOG_DEBUG("[NVS] Arguments '%s'", args[2].c_str());
+        LOG_DEBUG("[NVS] Arguments '%s'", args[3].c_str());
+    }
+
+    if (operation == "-h" || operation.length() == 0) {
         helpNvsCommand(client);
         return;
     }
 
-    if (args.startsWith("-rd")) {
-        String nameSpace = args.substring(4);
+    else if (operation == "-rd") {
+        if (args.size() < 4) {
+            client.println(styleText("Uso: nvsget -rd <namespace> <key>", "yellow", true));
+            client.println("Le um valor de uma chave no NVS");
+            return;
+        }
+
+        String nameSpace = args[2];
         String key;
         if (_log == true) {
             LOG_INFO("nvsget -rd %s\n", nameSpace.c_str());
         }
         // Remover o prefixo "-r" e depois dividir os argumentos restantes em namespace e chave
 
-        String remainingArgs = args.substring(3);
-        remainingArgs.trim();
+        String remainingArgs = args[3];
 
         int spaceIndex = remainingArgs.indexOf(" ");
         if (spaceIndex != -1) {
@@ -253,40 +296,22 @@ void TelnetCommands::handleNvsCommand(WiFiClient &client, const String &cmd) {
         return;
     }
 
-    if (args.startsWith("-s")) { // Formato: nvs -s <namespace> <chave=valor>
-        String nameSpace;
-        String key;
-        String value;
-
-        // Remove "-s " e divide em partes
-        String remainingArgs = args.substring(3); // Remove "-s "
-        remainingArgs.trim();
-
-        // Encontra o primeiro espaço (separando namespace do restante)
-        int spaceIndex = remainingArgs.indexOf(' ');
-        if (spaceIndex == -1) {
+    else if (operation == "-s") { // Formato: nvs -s <namespace> <chave=valor>
+        String nameSpace = args[2];
+        if (args.size() < 4) {
             client.println(styleText("Erro: ", "red", true) +
                            "Formato inválido. Use: nvs -s <namespace> <chave=valor>");
             return;
         }
 
-        // Extrai o namespace (parte antes do espaço)
-        nameSpace = remainingArgs.substring(0, spaceIndex);
-
-        // Extrai a parte "chave=valor" (após o namespace)
-        String keyValuePart = remainingArgs.substring(spaceIndex + 1);
-        keyValuePart.trim();
-
-        // Divide "chave=valor" em chave e valor
-        int equalsIndex = keyValuePart.indexOf('=');
-        if (equalsIndex == -1) {
+        std::vector<String> temp = splitCommand(args[3], '=');
+        if (temp.size() != 2) {
             client.println(styleText("Erro: ", "red", true) +
                            "Formato inválido. Use: nvs -s <namespace> <chave=valor>");
             return;
         }
-
-        key = keyValuePart.substring(0, equalsIndex);
-        value = keyValuePart.substring(equalsIndex + 1);
+        String key = temp[0];
+        String value = temp[1];
 
         if (_log) {
             LOG_INFO("nvs -s %s %s=%s\n", nameSpace.c_str(), key.c_str(), value.c_str());
@@ -332,13 +357,77 @@ void TelnetCommands::handleNvsCommand(WiFiClient &client, const String &cmd) {
             client.println(styleText("Tempo limite atingido. Operação cancelada.", "yellow", true));
             preferences.end();
             return;
+        } else { // ADICIONE ESTE BLOCO PARA NOVAS CHAVES
+            preferences.putString(key.c_str(), value.c_str());
+            preferences.end();
+            client.printf("%s Chave '%s' criada com valor '%s' no namespace '%s'.\r\n",
+                          styleText("SUCESSO: ", "green", true).c_str(), styleText(key, "green").c_str(),
+                          styleText(value, "green").c_str(), styleText(nameSpace, "green").c_str());
+            return;
         }
     }
 
+    else if (operation == "-x") { // Apagar namespace
+        if (args.size() < 3) {
+            client.println(styleText("Erro: ", "red", true) + "Especifique um namespace para apagar.");
+            return;
+        }
+
+        String nameSpace = args[2];
+        if (nameSpace.length() == 0) {
+            client.println(styleText("Erro: ", "red", true) + "Especifique um namespace para apagar.");
+            return;
+        }
+
+        client.print(styleText("AVISO: ", "yellow", true));
+        client.printf("Tem certeza que deseja apagar todo o namespace '%s'? (S/N)\r\n",
+                      styleText(nameSpace, "yellow", true).c_str());
+
+        client.clear();
+
+        unsigned long startTime = millis();
+        while (millis() - startTime < 5000) {
+            if (client.available()) {
+                char response = client.read();
+                if (response == 's' || response == 'S') {
+                    preferences.begin(nameSpace.c_str(), false);
+                    if (preferences.clear()) { // Apaga todas as chaves do namespace
+                        preferences.end();
+                        client.println(styleText("SUCESSO: ", "green", true) + "Namespace '" + nameSpace +
+                                       "' apagado completamente.");
+                    } else {
+                        client.println(styleText("ERRO: ", "red", true) + "Falha ao apagar o namespace '" + nameSpace +
+                                       "'");
+                    }
+                    return;
+                } else {
+                    client.println(styleText("Operação cancelada.", "yellow", true));
+                    return;
+                }
+            }
+            delay(50);
+        }
+        client.println(styleText("Tempo limite atingido. Operação cancelada.", "yellow", true));
+        return;
+    }
+
+    else if (operation.startsWith("-")) {
+        if (_log) {
+            LOG_INFO("[NVS] Opção inválida: %s", operation.c_str());
+        }
+        client.printf("Opção inválida: %s\r\n", styleText(operation, "yellow", true).c_str());
+        return;
+    }
+    if (_log) {
+        LOG_INFO("[NVS] Não foi selecionado uma opção verifique o help -h");
+    }
     client.println(styleText("Não foi selecionado uma opção verifique o help -h ", "yellow", true));
 }
 
 void TelnetCommands::handleIfConfigCommand(WiFiClient &client, const String &cmd) {
+    if (activeServer->isEchoEnabled()) {
+        client.println();
+    }
     String args = cmd.substring(8); // remove "ifconfig"
     args.trim();
 
@@ -392,7 +481,7 @@ void TelnetCommands::handleIfConfigCommand(WiFiClient &client, const String &cmd
         client.printf("  %-10s: %s\r\n", "IP", styleText(WiFi.localIP().toString(), "green").c_str());
         client.printf("  %-10s: %s\r\n", "Gateway", styleText(WiFi.gatewayIP().toString(), "green").c_str());
         client.printf("  %-10s: %s\r\n", "Subnet", styleText(WiFi.subnetMask().toString(), "green").c_str());
-        client.printf("  %-10s: %s\r\n", "DNS", styleText(WiFi.dnsIP().toString(), "green").c_str());
+        client.printf("  %-10s: %s\r\n", "mDNS", styleText(activeServer->getMdnsHostname(), "green").c_str());
 
         client.println(styleText("\nInformações WiFi:", "cyan", true));
         client.printf("  %-15s: %s\r\n", "SSID", styleText(WiFi.SSID(), "green").c_str());
@@ -412,14 +501,68 @@ void TelnetCommands::handleIfConfigCommand(WiFiClient &client, const String &cmd
     client.println();
 }
 
+void TelnetCommands::handlePingCommand(WiFiClient &client, const String &cmd) {
+    if (activeServer->isEchoEnabled()) {
+        client.println();
+    }
+    String args = cmd.substring(5); // remove "ping "
+    args.trim();
+
+    // Mostrar ajuda se solicitado
+    if (args == "-h") {
+        helpPingCommand(client);
+        return;
+    }
+
+    // Verificar se há argumentos suficientes
+    if (args.length() == 0) {
+        client.println(styleText("Uso: ping <hostname/IP> [tentativas]", "red", true));
+        client.println(styleText("Use 'ping -h' para ajuda", "yellow"));
+        return;
+    }
+
+    // Extrair hostname e número de tentativas
+    int spacePos = args.indexOf(' ');
+    String hostname = args;
+    int attempts = 4; // padrão: 4 tentativas
+
+    if (spacePos != -1) {
+        hostname = args.substring(0, spacePos);
+        String attemptsStr = args.substring(spacePos + 1);
+        attempts = attemptsStr.toInt();
+        if (attempts < 1 || attempts > 10) {
+            client.println(styleText("Número de tentativas deve estar entre 1 e 10", "red", true));
+            return;
+        }
+    }
+
+    client.println(styleText("Pingando " + hostname + " (" + String(attempts) + " tentativas)...", "cyan", true));
+    client.println();
+
+    // Executar o ping
+    bool success = pingHost(hostname, attempts, client);
+
+    client.println();
+    if (success) {
+        client.println(styleText("Ping concluído com sucesso!", "green", true));
+    } else {
+        client.println(styleText("Falha no ping para " + hostname, "red", true));
+    }
+}
+
 // Implementação do pwd
 void TelnetCommands::handlePrintWorkingDir(WiFiClient &client, const String &) {
+    if (activeServer->isEchoEnabled()) {
+        client.println();
+    }
     client.printf("Diretório atual: %s\r\n", currentDirectory.c_str());
 }
 
 // Implementação do exit
 void TelnetCommands::handleExitCommand(WiFiClient &client, const String &cmd) {
-
+    if (activeServer->isEchoEnabled()) {
+        client.println();
+    }
     String pathArg = cmd.substring(5);
     pathArg.trim();
     // Verifica se foi solicitada ajuda
@@ -649,6 +792,26 @@ void TelnetCommands::helpIfConfigCommand(WiFiClient &client) {
     client.println(styleText("  -h", "cyan", true) + "  Mostra esta ajuda");
 }
 
+void TelnetCommands::helpPingCommand(WiFiClient &client) {
+    client.println(styleText("Ajuda do comando ping:", "yellow", true));
+    client.println(styleText("Uso: ", "green", true) + "ping <hostname/IP> [tentativas]");
+
+    client.println(styleText("Descrição:", "green", true));
+    client.println("Testa a conectividade de rede com outro dispositivo");
+
+    client.println(styleText("Parâmetros:", "green", true));
+    client.println(styleText("  hostname/IP", "cyan", true) + "  Nome ou endereço IP do host de destino");
+    client.println(styleText("  tentativas", "cyan", true) + "   Número de tentativas (1-10, padrão=4)");
+
+    client.println(styleText("Opções:", "green", true));
+    client.println(styleText("  -h", "cyan", true) + "          Mostra esta ajuda");
+
+    client.println(styleText("Exemplos:", "green", true));
+    client.println(styleText("  ping 192.168.1.1", "white") + "       Ping para o endereço IP");
+    client.println(styleText("  ping google.com", "white") + "        Ping para um hostname");
+    client.println(styleText("  ping 192.168.1.1 6", "white") + "    Ping com 6 tentativas");
+}
+
 void TelnetCommands::helpExitCommand(WiFiClient &client) {
     client.println(styleText("Ajuda do comando exit:", "yellow", true));
     client.println(styleText("Uso: ", "green", true) + "exit");
@@ -688,4 +851,90 @@ String TelnetCommands::getAnsiColorCode(const String &colorName) {
     if (colorName == "white")
         return "\033[37m";
     return ""; // default sem cor
+}
+
+bool TelnetCommands::pingHost(const String &hostname, int maxAttempts, WiFiClient &client) {
+    IPAddress ip;
+
+    // Resolver o hostname para IP se necessário
+    if (!WiFi.hostByName(hostname.c_str(), ip)) {
+        client.println(styleText("Não foi possível resolver o hostname: " + hostname, "red", true));
+        return false;
+    }
+
+    client.printf("Pingando %s [%s] com %d bytes de dados:\r\n", styleText(hostname, "cyan").c_str(),
+                  styleText(ip.toString(), "cyan").c_str(), 32);
+
+    bool anySuccess = false;
+    int packetSize = 32;
+    int totalTime = 0;
+    int successCount = 0;
+
+    for (int i = 0; i < maxAttempts; i++) {
+        unsigned long startTime = millis();
+        bool reply = Ping.ping(ip, 1); // 1 tentativa por ping
+
+        if (reply) {
+            unsigned long duration = millis() - startTime;
+            client.printf("Resposta de %s: bytes=%d tempo=%lums TTL=%d\r\n", styleText(ip.toString(), "green").c_str(),
+                          packetSize, duration,
+                          128); // TTL fixo (não temos essa informação)
+            totalTime += duration;
+            successCount++;
+            anySuccess = true;
+        } else {
+            client.println(styleText("Tempo limite esgotado.", "red"));
+        }
+
+        delay(1000); // Intervalo entre pings
+    }
+
+    // Estatísticas
+    if (successCount > 0) {
+        client.println();
+        client.println(styleText("Estatísticas do Ping:", "yellow", true));
+        client.printf("    Pacotes: Enviados = %d, Recebidos = %d, Perdidos = %d (%.0f%% de perda)\r\n", maxAttempts,
+                      successCount, maxAttempts - successCount, ((maxAttempts - successCount) * 100.0 / maxAttempts));
+
+        if (successCount > 0) {
+            client.printf("Tempo aproximado de ida e volta em ms:\r\n"
+                          "    Mínimo = %dms, Máximo = %dms, Média = %dms\r\n",
+                          totalTime / successCount, // Simplificação
+                          totalTime / successCount, totalTime / successCount);
+        }
+    }
+
+    return anySuccess;
+}
+
+String TelnetCommands::getCommand(const String &cmd) {
+    String trimmedCmd = cmd;
+    trimmedCmd.trim();
+    int spaceIndex = trimmedCmd.indexOf(' ');
+    return (spaceIndex == -1) ? trimmedCmd : trimmedCmd.substring(0, spaceIndex);
+}
+
+std::vector<String> TelnetCommands::splitCommand(const String &cmd, char delimiter) {
+    std::vector<String> parts;
+    int start = 0;
+    int end = cmd.indexOf(delimiter);
+
+    while (end != -1) {
+        String part = cmd.substring(start, end);
+        part.trim();
+        if (part.length() > 0) {
+            parts.push_back(part);
+        }
+        start = end + 1;
+        end = cmd.indexOf(delimiter, start);
+    }
+
+    // Adiciona a última parte
+    String lastPart = cmd.substring(start);
+    lastPart.trim();
+    if (lastPart.length() > 0) {
+        parts.push_back(lastPart);
+    }
+
+    return parts;
 }
